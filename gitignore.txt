@@ -1,0 +1,6 @@
+# large generated files: regenerate with the scripts in code/
+*.pkl
+*.pth
+*.tar.gz
+__pycache__/
+.ipynb_checkpoints/

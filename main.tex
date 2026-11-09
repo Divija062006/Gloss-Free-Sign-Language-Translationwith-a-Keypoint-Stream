@@ -1,0 +1,196 @@
+
+\documentclass[8pt,a4paper]{article}
+
+% ------------------------------------------------
+% Packages
+% ------------------------------------------------
+\usepackage[
+    top=0.15in,
+    bottom=0.15in,
+    left=0.55in,
+    right=0.55in
+]{geometry}
+
+\usepackage{amsmath,amsfonts,amssymb}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{makecell}
+\usepackage{caption}
+\usepackage{hyperref}
+\usepackage{titlesec}
+
+% ------------------------------------------------
+% Formatting
+% ------------------------------------------------
+
+% Black-and-white hyperlinks
+\hypersetup{
+    colorlinks=true,
+    allcolors=black
+}
+
+% Reduce line spacing
+\linespread{0.52}
+
+% Reduce paragraph spacing
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{1pt}
+
+% Reduce section heading spacing
+\titlespacing*{\subsection}
+{0pt}{7pt}{3pt}
+
+% Table formatting
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.05}
+
+\captionsetup[table]{
+    font=small,
+    labelfont=bf,
+    position=top,
+    skip=3pt
+}
+
+% ------------------------------------------------
+% Document
+% ------------------------------------------------
+\begin{document}
+\thispagestyle{empty}
+
+% ------------------------------------------------
+% Title and Team Information
+% ------------------------------------------------
+\begin{center}
+
+{\large\bfseries
+Gloss-Free Sign Language Translation: GFSLT-VLP with a Keypoint Stream}\\[4pt]
+
+\textbf{Team:} Claude5
+\quad | \quad
+\textbf{GitHub:}
+\url{https://github.com/username/project-repo}\\[2pt]
+\textbf{Members:}
+Gundapuneni Divija (230121025), Devansh Singh (230106021), Konica Maibam (266102015),
+Priyanshu Kumar (230103080), Hemakshi Kumar (230108020)
+
+\end{center}
+
+\vspace{-5pt}
+
+% ------------------------------------------------
+\subsection*{I. Abstract (Maximum 100 Words)}
+% ------------------------------------------------
+Sign language translation usually depends on glosses, sign-by-sign annotations that are expensive and discard facial and spatial information; gloss-free models avoid them but trail gloss-based systems by about 7 BLEU-4 on PHOENIX14T. Without glosses, nothing tells the model which visual details carry meaning. GFSLT-VLP first pretrains the visual encoder with a CLIP-style contrastive loss aligning each video with its sentence, plus masked sentence restoration, then fine-tunes an encoder--decoder translator. This injects sentence-level semantics into visual features without gloss supervision, letting a gloss-free model match early gloss-based systems (21.44 vs.\ 21.32 test BLEU-4).
+
+% ------------------------------------------------
+\subsection*{II. Proposed Novelty \& Technical Contribution}
+% ------------------------------------------------
+\begin{enumerate}
+    \item \textbf{Novelty:} we add a \emph{second input stream of explicit body, hand and face keypoints} to GFSLT-VLP. MediaPipe gives 75 points per frame (11 upper-body, $2\times21$ hand, 22 face), normalised, embedded by a small network and fused with the ResNet18 frame features before the temporal blocks.
+    \item \textbf{Type:} an \emph{architectural modification} (a new input module plus early feature fusion). Losses, decoder and schedule are unchanged; the stream is used in both VLP and translation.
+    \item \textbf{Difference from the baseline:} GFSLT-VLP sees only RGB frames, so finger shape and hand position must be inferred from a $224\times224$ image where a hand spans a few dozen pixels; our stream supplies them as explicit, signer-normalised coordinates. Keypoints come from an off-the-shelf detector, not human labels, so the method stays gloss-free. On a free single-GPU budget (Kaggle T4) we reimplemented the paper with a frozen ResNet18 on pre-extracted features, shared by all compared models.
+\end{enumerate}
+
+% ------------------------------------------------
+\subsection*{III. Theoretical / Mathematical Justification}
+% ------------------------------------------------
+\begin{enumerate}
+    \item \textbf{Formulation.} Let $I_t$ be frame $t$ and $p_{t,j}\in\mathbb{R}^2$ keypoint $j$. With shoulder midpoint $c=\mathrm{med}_t\tfrac{1}{2}(p_{t,\mathrm{LS}}+p_{t,\mathrm{RS}})$ and width $s=\mathrm{med}_t\lVert p_{t,\mathrm{LS}}-p_{t,\mathrm{RS}}\rVert$:
+    \begin{equation*}
+    \hat p_{t,j}=\frac{p_{t,j}-c}{s},\quad
+    k_t=\big[\hat p_{t,1..75};\,m_t\big]\in\mathbb{R}^{225},\quad
+    g(k_t)=\sigma\!\big(W_2\,\sigma(\mathrm{LN}(W_1k_t+b_1))+b_2\big)\in\mathbb{R}^{256},
+    \end{equation*}
+    \begin{equation*}
+    x_t=\big[f_t;\,g(k_t)\big]\in\mathbb{R}^{768},\ f_t=\phi_{\mathrm{R18}}(I_t)\in\mathbb{R}^{512},\quad
+    Z=\mathrm{Enc}\big(\mathrm{TConv}(x_{1:T})\big),\quad
+    \mathcal{L}_{\mathrm{SLT}}=-\textstyle\sum_u\log p_\theta(y_u\mid y_{<u},Z).
+    \end{equation*}
+    \item \textbf{Variables and reasoning.} $m_t\in\{0,1\}^{75}$: detection flags (missed points interpolated in time); $\sigma$: ReLU; $\mathrm{LN}$: layer norm; $W_1\in\mathbb{R}^{256\times225}$, $W_2\in\mathbb{R}^{256\times256}$; $\phi_{\mathrm{R18}}$: frozen ImageNet ResNet18; $\mathrm{TConv}$: two Conv1D(k=5)+pool blocks; $\mathrm{Enc}$: 3-layer transformer; VLP keeps $\mathcal{L}=\mathcal{L}_s+0.1\,\mathcal{L}_c$. (a) \emph{Nesting:} zeroing the first-convolution weights on the 256 keypoint channels recovers the baseline exactly, so the baseline is a special case and the best achievable loss cannot increase. (b) \emph{Invariance:} $\hat p$ is unchanged under $p\mapsto ap+b$ ($a>0$), removing signer position and camera distance as nuisance variation. (c) \emph{Motion:} the k=5 Conv1D can compute $k_{t+1}-k_t$, i.e.\ hand velocity. (d) \emph{Complementarity:} $f_t$ is globally pooled over the frame, compressing hand configuration; $k_t$ encodes it directly.
+    \item \textbf{Causal link.} (a)--(d) show the stream \emph{can} help, not that it must. It adds only 0.78M parameters (+2.9\%), so capacity alone is an unlikely explanation, and the ablation below (same seed, data and schedule; only the stream differs) isolates its effect.
+\end{enumerate}
+
+% ------------------------------------------------
+\subsection*{IV. Comparative Results \& Empirical Evaluation}
+% ------------------------------------------------
+\begin{enumerate}
+    \item \textbf{Setup:} RWTH-PHOENIX-Weather 2014T, split 7096/519/642, glosses never used. Frames $210\times260$ resized to 256 and centre-cropped to 224 for ResNet18; MediaPipe at native resolution on every 2nd frame. One T4; 60 VLP + 100 translation epochs; beam 5.
+    \item \textbf{Comparison:} Table~\ref{tab:results}; reproduced GFSLT and GFSLT-VLP are the baselines, ``+ KP'' adds our stream.
+    \item \textbf{Takeaway:} the keypoint stream improves test BLEU-4 by \textbf{+3.58} over reproduced GFSLT (11.48$\to$15.06) and by \textbf{+2.74} over reproduced GFSLT-VLP (12.15$\to$14.89), with gains on every metric and split.
+\end{enumerate}
+
+% ------------------------------------------------
+% Results Table
+% ------------------------------------------------
+\begin{center}
+
+\captionof{table}{
+Quantitative comparison of the reproduced baselines and the proposed keypoint stream on PHOENIX14T (gloss-free).
+Best results are highlighted in bold. Params: trainable translation model, excluding the frozen ResNet18 (11.18M) shared by all rows.
+Latency: mean per test video on one T4 from pre-extracted features (visual encoder + beam-5 decoding); feature extraction is extra: ResNet18 43.5\,ms per video (T4), MediaPipe ${\sim}$2.5\,s per video (4 CPU cores).
+}
+
+\label{tab:results}
+
+\small
+
+\begin{tabularx}{\linewidth}{
+    @{}X c c c c c c@{}
+}
+
+\toprule
+
+\textbf{Method}
+&
+\makecell{\textbf{Dev B4}\\($\uparrow$)}
+&
+\makecell{\textbf{Test B1}\\($\uparrow$)}
+&
+\makecell{\textbf{Test B4}\\($\uparrow$)}
+&
+\makecell{\textbf{Test ROUGE}\\($\uparrow$)}
+&
+\makecell{\textbf{Params}\\(M)}
+&
+\makecell{\textbf{Latency}\\(ms $\downarrow$)}
+\\
+
+\midrule
+
+GFSLT, reproduced (baseline)
+& 11.26 & 28.62 & 11.48 & 28.59 & 26.44 & 78.0 \\
+
+GFSLT-VLP, reproduced (baseline)
+& 11.52 & 30.57 & 12.15 & 29.90 & 26.44 & 77.9 \\
+
+\textbf{Ours: GFSLT + KP}
+& \textbf{13.96} & 33.99 & \textbf{15.06} & 33.62 & 27.22 & 76.9 \\
+
+\textbf{Ours: GFSLT-VLP + KP}
+& 13.79 & \textbf{34.43} & 14.89 & \textbf{33.93} & 27.22 & 76.9 \\
+
+\midrule
+
+$\Delta$ (GFSLT + KP -- GFSLT)
+& +2.70 & +5.37 & +3.58 & +5.03 & +0.78 & $-$1.1 \\
+
+$\Delta$ (GFSLT-VLP + KP -- GFSLT-VLP)
+& +2.27 & +3.86 & +2.74 & +4.03 & +0.78 & $-$1.0 \\
+
+\midrule
+
+\textit{GFSLT-VLP, paper (full fine-tuning, 4 GPUs)}
+& \textit{22.12} & \textit{43.71} & \textit{21.44} & \textit{42.49} & -- & -- \\
+
+\bottomrule
+
+\end{tabularx}
+
+\end{center}
+
+\vspace{-5pt}
+
+\textbf{Result Interpretation:}
+Keypoints dominate (+2.7--3.6 test BLEU-4, +4--5 ROUGE-L) while VLP adds +0.67 / $-$0.17, matching the paper's Table~3 (+0.11 without strong image augmentation, which frozen features rule out). Keypoints fix sentence type, dates and word order (``im westen ist es freundlich'': baseline ``sch\"onen abend noch'', ours exact); numbers remain the main errors and hands are found in only ${\sim}$60\% of frames. A fine-tuned CNN partly learns hand detail, so we expect a smaller, still untested gain in the full GFSLT-VLP (keypoints also help the fine-tuned TS-SLT). Translation latency is unchanged (${\sim}$1\,ms noise); the extra cost is CPU keypoint extraction. One seed per model: VLP differences are within noise; the keypoint gain is consistent everywhere.
+
+\end{document}
